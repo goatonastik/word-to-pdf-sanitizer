@@ -40,6 +40,7 @@ if (!$Check) {
     <DockPanel Margin="0,4"><TextBlock Text="Verification workers:" VerticalAlignment="Center"/><TextBox Name="VerifierWorkers" Text="0" Width="65" Margin="10,0,0,0" HorizontalAlignment="Left"/></DockPanel>
     <TextBlock Text="0 = automatic; 1–16 = fixed parallel PDF workers" TextWrapping="Wrap" Foreground="#455468" Margin="0,0,0,8"/>
     <CheckBox Name="ShowReviewPopup" IsChecked="True" Margin="0,4"><TextBlock Text="Show pop up dialogue box if files flagged for review" TextWrapping="Wrap"/></CheckBox>
+    <CheckBox Name="WarnExistingWord" IsChecked="True" Margin="0,4"><TextBlock Text="Warn before converting when Microsoft Word is already open" TextWrapping="Wrap"/></CheckBox>
     <CheckBox Name="DebugLogging" IsChecked="True" Margin="0,4" ToolTip="Records operation stages, paths, lengths, worker activity and exceptions. Does not deliberately log document text or property values."><TextBlock Text="Enable debug logging (for troubleshooting)" TextWrapping="Wrap"/></CheckBox>
     <CheckBox Name="Sound" Content="Completion ding" IsChecked="True" Margin="0,4"/>
     <WrapPanel Margin="0,10,0,8"><Button Name="OpenReview" Content="Open #REVIEW folder" Padding="10,5" Margin="0,0,8,6"/><Button Name="OpenLogs" Content="Open logs" Padding="10,5" Margin="0,0,8,6"/><Button Name="PrivacyReport" Content="Privacy Excel" Padding="10,5" Margin="0,0,0,6" IsEnabled="False"/></WrapPanel>
@@ -63,7 +64,7 @@ $window = [Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader
 $window.Title = 'Word to PDF Sanitizer v' + $appVersion
 $controls = @{}
 foreach ($name in 'Root','Archive','BrowseRoot','BrowseArchive','Destination','HideText','HideProperties','PreserveVisibleRevisions','RemoveAllComments','StripMetadata','Preview','Start','Status','Log','Progress','Counts','Sound','OpenLogs','RemoveLinks','ExcludeTags','QueueLimit','VerifierWorkers','PrivacyReport','ShowReviewPopup','OpenReview','DebugLogging') { $controls[$name] = $window.FindName($name) }
-foreach($name in 'CopyLog','RestoreOriginals','DeleteLogs','Reports','OpenReport','OpenDetailedReport') { $controls[$name]=$window.FindName($name) }
+foreach($name in 'CopyLog','RestoreOriginals','DeleteLogs','Reports','OpenReport','OpenDetailedReport','WarnExistingWord') { $controls[$name]=$window.FindName($name) }
 $settingsPath = Join-Path $PSScriptRoot 'preferences.json'
 $script:running = $null
 function Save-Preferences {
@@ -72,6 +73,7 @@ function Save-Preferences {
  [int]$validWorkers = 0
  if (![int]::TryParse($controls.VerifierWorkers.Text,[ref]$validWorkers) -or $validWorkers -lt 0 -or $validWorkers -gt 16) { $controls.VerifierWorkers.Text='0' }
  $values = @{root=$controls.Root.Text; archive=$controls.Archive.Text; hideText=[bool]$controls.HideText.IsChecked; preserveVisibleRevisions=[bool]$controls.PreserveVisibleRevisions.IsChecked; removeAllComments=[bool]$controls.RemoveAllComments.IsChecked; stripMetadata=[bool]$controls.StripMetadata.IsChecked; excludeProperties=[bool]$controls.HideProperties.IsChecked; removeLinks=[bool]$controls.RemoveLinks.IsChecked; excludeTags=[bool]$controls.ExcludeTags.IsChecked; queueLimit=[int]$controls.QueueLimit.Text; verifierWorkers=[int]$controls.VerifierWorkers.Text; showReviewPopup=[bool]$controls.ShowReviewPopup.IsChecked; debugLogging=[bool]$controls.DebugLogging.IsChecked; schema=3; sound=[bool]$controls.Sound.IsChecked}
+ $values.warnExistingWord=[bool]$controls.WarnExistingWord.IsChecked
  $values | ConvertTo-Json | Set-Content -LiteralPath $settingsPath -Encoding UTF8
 }
 function Update-Destination {
@@ -100,7 +102,7 @@ if (Test-Path -LiteralPath $settingsPath) {
    if ($null -ne $saved.queueLimit) { $controls.QueueLimit.Text=[string]$saved.queueLimit }
    if ($null -ne $saved.verifierWorkers) { $controls.VerifierWorkers.Text=[string]$saved.verifierWorkers }
   }
-  foreach ($name in 'Sound','ShowReviewPopup','DebugLogging') { if ($null -ne $saved.$name) { $controls[$name].IsChecked = [bool]$saved.$name } }
+  foreach ($name in 'Sound','ShowReviewPopup','DebugLogging','WarnExistingWord') { if ($null -ne $saved.$name) { $controls[$name].IsChecked = [bool]$saved.$name } }
  } catch {}
 }
 foreach ($name in 'Root','Archive') {
@@ -218,6 +220,28 @@ function New-DetailedReviewDialog {
 '@
  return [Windows.Markup.XamlReader]::Load((New-Object Xml.XmlNodeReader $detailXml))
 }
+function New-ExistingWordDialog($count) {
+ [xml]$noticeXml=@'
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" Title="Microsoft Word is already open" Width="570" SizeToContent="Height" ResizeMode="NoResize" WindowStartupLocation="CenterOwner">
+ <StackPanel Margin="24"><TextBlock Name="Message" TextWrapping="Wrap" Margin="0,0,0,18"/><CheckBox Name="DontWarnAgain" Content="Don't warn me again" Margin="0,0,0,18"/><StackPanel Orientation="Horizontal" HorizontalAlignment="Right"><Button Name="Cancel" Content="Cancel" Padding="20,7" Margin="0,0,10,0" IsCancel="True"/><Button Name="Continue" Content="Continue" Padding="20,7"/></StackPanel></StackPanel>
+</Window>
+'@
+ $dialog=[Windows.Markup.XamlReader]::Load((New-Object Xml.XmlNodeReader $noticeXml));$dialog.Tag=$false
+ $dialog.FindName('Message').Text="Detected $count existing Word process(es). Conversion will use a separate Word instance and leave your open documents alone.`n`nWord preferences are saved for your Windows account. Which Word instance closes last can affect future preferences, particularly if conversion is interrupted. The converter restores its settings on normal shutdown.`n`nAvoid opening or editing files in the Starting directory while they are being converted. Continue?"
+ return $dialog
+}
+function Confirm-ExistingWord($owner=$window) {
+ if(!$controls.WarnExistingWord.IsChecked){return $true}
+ $existing=@(Get-Process WINWORD -ErrorAction SilentlyContinue)
+ if(!$existing.Count){return $true}
+ $notice=New-ExistingWordDialog $existing.Count;$notice.Owner=$owner
+ $notice.FindName('Cancel').Add_Click({$notice.Tag=$false;$notice.Close()})
+ $notice.FindName('Continue').Add_Click({$notice.Tag=$true;$notice.Close()})
+ [void]$notice.ShowDialog()
+ if($notice.Tag -and $notice.FindName('DontWarnAgain').IsChecked){$controls.WarnExistingWord.IsChecked=$false;Save-Preferences}
+ return [bool]$notice.Tag
+}
+$controls.WarnExistingWord.Add_Click({try {Save-Preferences} catch {[Windows.MessageBox]::Show($_.Exception.Message,'Save preferences')|Out-Null}})
 function Show-DetailedReview($reportPath) {
  if($script:running -and !$script:running.HasExited) { [Windows.MessageBox]::Show('Wait for the current conversion or maintenance operation to finish.','Detailed review') | Out-Null;return }
  if(!$reportPath -or !(Test-Path -LiteralPath $reportPath -PathType Leaf)) { [Windows.MessageBox]::Show('Select an available Excel report first.','Detailed review') | Out-Null;return }
@@ -238,6 +262,7 @@ function Show-DetailedReview($reportPath) {
    $action=[string]$button.CommandParameter
    if($action -eq 'open') { try { if(Test-Path -LiteralPath ([string]$button.Tag)){Start-Process -FilePath ([string]$button.Tag)}else{throw 'The selected file is not currently available.'} } catch {[Windows.MessageBox]::Show($_.Exception.Message,'Open document')|Out-Null};return }
    $row=@($entries|Where-Object {$_.id -eq [string]$button.Tag})[0];if(!$row){return}
+   if($action -eq 'undo' -and $row.decision -eq 'Reverted' -and !(Confirm-ExistingWord $detail)){return}
    try {
     $detail.Cursor=[Windows.Input.Cursors]::Wait;$status.Text= if($action -eq 'undo' -and $row.decision -eq 'Reverted'){'Converting this document again and verifying it...'}else{'Applying '+$action+'...'}
     [Windows.Threading.Dispatcher]::CurrentDispatcher.Invoke([Action]{},[Windows.Threading.DispatcherPriority]::Render)
@@ -304,6 +329,7 @@ function Run-Conversion($preview) {
   if (!$controls.Root.Text.Trim() -or !$controls.Archive.Text.Trim()) { throw 'Choose both folders first.' }
   [int]$queue = 0; if (![int]::TryParse($controls.QueueLimit.Text, [ref]$queue) -or $queue -lt 0) { throw 'Queue limit must be 0 or a positive whole number.' }
   [int]$workers = 0; if (![int]::TryParse($controls.VerifierWorkers.Text,[ref]$workers) -or $workers -lt 0 -or $workers -gt 16) { throw 'Verification workers must be 0 (automatic) or a whole number from 1 to 16.' }; Save-Preferences
+  if(!$preview -and !(Confirm-ExistingWord)){ $controls.Status.Text='Conversion cancelled before starting.';return }
   $python = Join-Path $env:USERPROFILE '.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe'
   if (!(Test-Path -LiteralPath $python)) { throw 'The bundled Python runtime is missing.' }
   New-Item -ItemType Directory -Path $script:logsDir -Force | Out-Null
@@ -479,6 +505,13 @@ if ($Check) {
  if(!$controls.Reports -or !$controls.OpenReport -or !$controls.OpenDetailedReport) { throw 'Report picker controls are missing.' }
  foreach($node in $layout.SelectNodes('//*[local-name()="TextBlock"]')) { if($node.Text -eq 'Word to PDF Sanitizer') { throw 'Redundant in-window program name remains.' } }
  [void](New-ReviewDialog)
+ $wordNotice=New-ExistingWordDialog 2
+ if(!$wordNotice.FindName('Cancel') -or !$wordNotice.FindName('Continue') -or [bool]$wordNotice.Tag){throw 'Existing Word notice must support Continue/Cancel and default to cancellation.'}
+ if(!$wordNotice.FindName('DontWarnAgain') -or !$controls.WarnExistingWord){throw 'Existing Word warning preference controls are missing.'}
+ $previousWarning=$controls.WarnExistingWord.IsChecked
+ $controls.WarnExistingWord.IsChecked=$false
+ if(!(Confirm-ExistingWord)){throw 'Disabled warning must permit continuation without a popup.'}
+ $controls.WarnExistingWord.IsChecked=$previousWarning
  [void](New-DetailedReviewDialog)
  if(!(Test-Path -LiteralPath (Join-Path $PSScriptRoot 'review_manager.py'))) { throw 'Detailed review manager is missing.' }
  $controls.Root.Text='"C:\Example Folder"'

@@ -3,6 +3,7 @@ $ErrorActionPreference = 'Stop'
 $word=$null; $owned=$false; $saved=@{}; $process=$null;$debugWriter=$null
 . (Join-Path $PSScriptRoot 'PropertyInventory.ps1')
 . (Join-Path $PSScriptRoot 'WordSessionSupport.ps1')
+. (Join-Path $PSScriptRoot 'WordExportGuards.ps1')
 $optionsPath=Join-Path $Workspace 'options.json'
 $parent=if($ParentPid -gt 0) { Get-Process -Id $ParentPid -ErrorAction SilentlyContinue } else { $null }
 $debugPath=$null
@@ -35,14 +36,15 @@ try {
  if($ParentPid -gt 0 -and !$parent) { throw 'Conversion parent process is no longer running.' }
  Trace-Word 'starting Word session'
  $before=@(Get-Process WINWORD -ErrorAction SilentlyContinue)
- if ($before.Count) { throw 'Close Microsoft Word before starting.' }
+ if ($before.Count) { Trace-Word 'existing Word processes detected; creating isolated conversion instance' @{existing_pids=@($before.Id)} }
  $word=New-Object -ComObject Word.Application
- $owned=$true
  $ownedPid=[WordPdfProcessIdentity]::ForWindow([int]$word.Hwnd)
  $newProcesses=@(Get-Process WINWORD -ErrorAction SilentlyContinue | Where-Object { $before.Id -notcontains $_.Id })
  if($ownedPid -le 0 -and $newProcesses.Count -eq 1) { $ownedPid=$newProcesses[0].Id }
  if($ownedPid -le 0 -or $newProcesses.Id -notcontains $ownedPid) { throw 'Could not unambiguously identify the Word instance created for conversion.' }
+ $owned=$true
  $process=Get-Process -Id $ownedPid
+ $ownerStarted=$process.StartTime.ToUniversalTime().ToString('o')
  Reply (Join-Path $Workspace 'owner.json') @{pid=$process.Id; started=$process.StartTime.ToUniversalTime().ToString('o')}
  $word.Visible=$false; $word.DisplayAlerts=0; $word.AutomationSecurity=3
  Trace-Word 'configuring Word session' @{word_version=$word.Version;word_pid=$process.Id}
@@ -54,23 +56,26 @@ try {
  foreach($name in 'PrintHiddenText','UpdateFieldsAtPrint','UpdateLinksAtPrint','UpdateLinksAtOpen','SaveNormalPrompt','ShowMarkupOpenSave') { $saved[$name]=$word.Options.$name }
  Reply $optionsPath $saved
  foreach($name in $saved.Keys) { $word.Options.$name=$false }
- Reply (Join-Path $Workspace 'ready.json') @{ok=$true; version=$word.Version; pid=$process.Id}
+ Reply (Join-Path $Workspace 'ready.json') @{ok=$true; version=$word.Version; pid=$process.Id;existingWordCount=$before.Count}
  while (!(Test-Path -LiteralPath (Join-Path $Workspace 'stop'))) {
   if($parent -and $parent.HasExited) { Trace-Word 'parent process exited'; break }
   $jobFile=Join-Path $Workspace 'job.json'
   if (!(Test-Path -LiteralPath $jobFile)) { Start-Sleep -Milliseconds 10; continue }
     $job=Get-Content -LiteralPath $jobFile -Raw | ConvertFrom-Json
   Remove-Item -LiteralPath $jobFile
-  $doc=$null; $audit=$null; $timing=@{}; $clock=[Diagnostics.Stopwatch]::StartNew()
+  $doc=$null; $audit=@{wordGuardChecks=0;wordGuardSeconds=0.0;wordGuardEvents=@()}; $timing=@{}; $clock=[Diagnostics.Stopwatch]::StartNew()
   try {
    $m=[Type]::Missing; $password=[Guid]::NewGuid().ToString()
+   Assert-WordExportGuard $word $ownedPid $ownerStarted @($before.Id) $audit 'Before document open'
    Trace-Word 'opening working document'
    $doc=$word.Documents.Open($job.source,$false,$true,$false,$password,$password,$false,$password,$password,$m,$m,$true,$false)
+   Assert-WordExportGuard $word $ownedPid $ownerStarted @($before.Id) $audit 'After document open' $false
    $doc.Activate()
    Trace-Word 'inspecting filename fields and saved display'
    Assert-WorkingFields $doc ([IO.Path]::GetFileName($job.source)) $job.originalName
    $timing.open=$clock.Elapsed.TotalSeconds; $clock.Restart()
-   $audit=@{commentsFound=$doc.Comments.Count; revisionsFound=(Get-StoryRevisionCount $doc); customPropertiesFound=$doc.CustomDocumentProperties.Count; commentsRemoved=0; revisionsAccepted=0; hiddenRangesRemoved=0; propertiesExcluded=[bool]$config.excludeProperties; tagsExcluded=[bool]$config.excludeTags}
+   $initialAudit=@{commentsFound=$doc.Comments.Count; revisionsFound=(Get-StoryRevisionCount $doc); customPropertiesFound=$doc.CustomDocumentProperties.Count; commentsRemoved=0; revisionsAccepted=0; hiddenRangesRemoved=0; propertiesExcluded=[bool]$config.excludeProperties; tagsExcluded=[bool]$config.excludeTags}
+   foreach($key in $initialAudit.Keys){$audit[$key]=$initialAudit[$key]}
    $inventory=[WordPdfPropertyInventory]::Read($doc)
    foreach($key in $inventory.Keys) { $audit[$key]=$inventory[$key] }
    $view=$doc.ActiveWindow.View
@@ -119,6 +124,7 @@ try {
    Trace-Word 'exporting appearance reference'
    if($doc.ProtectionType -eq -1) { $doc.Repaginate() }
    Trace-Layout $doc 'reference layout ready'
+   Assert-WordExportGuard $word $ownedPid $ownerStarted @($before.Id) $audit 'Before reference export'
    $doc.ExportAsFixedFormat(($job.output+'.baseline.pdf'),17,$false,0,0,1,1,$baselineItem,$false,$true,0,$false,$true,$false)
    $timing.reference_export=$clock.Elapsed.TotalSeconds; $clock.Restart()
     $referenceMarkedClean=$false
@@ -144,6 +150,7 @@ try {
    $timing.prepare=$clock.Elapsed.TotalSeconds; $clock.Restart()
    $item=$baselineItem
    # PDF, print quality, all pages, no source properties by default. Preserve IRM.
+    Assert-WordExportGuard $word $ownedPid $ownerStarted @($before.Id) $audit 'Before prepared export'
     $sameExportOptions=[bool]$config.excludeProperties -and [bool]$config.excludeTags -and $item -eq $baselineItem
     $noPostReferenceChanges=($audit.revisionsAccepted -eq 0 -and $audit.hiddenRangesRemoved -eq 0)
     $reuseReference=$referenceMarkedClean -and [bool]$doc.Saved -and $sameExportOptions -and $noPostReferenceChanges
@@ -155,6 +162,7 @@ try {
      Trace-Word 'exporting prepared PDF'
      if($doc.ProtectionType -eq -1) { $doc.Repaginate() }
      Trace-Layout $doc 'prepared layout ready'
+     Assert-WordExportGuard $word $ownedPid $ownerStarted @($before.Id) $audit 'Before prepared PDF publication'
      $doc.ExportAsFixedFormat($job.output,17,$false,0,0,1,1,$item,(!$config.excludeProperties),$true,0,(!$config.excludeTags),$true,$false)
     }
    $timing.export=$clock.Elapsed.TotalSeconds
@@ -163,6 +171,8 @@ try {
    Trace-Word 'document error' @{exception=$_.Exception.ToString();position=$_.InvocationInfo.PositionMessage}
    $reply=@{ok=$false; error=($_.Exception.ToString() + ' at ' + $_.InvocationInfo.PositionMessage); timings=$timing; audit=$audit}
   } finally {
+   $timing.word_guard_checks=[double]$audit.wordGuardSeconds
+   Trace-Word 'Word export guard summary' @{checks=$audit.wordGuardChecks;seconds=$audit.wordGuardSeconds;events=$audit.wordGuardEvents}
    Trace-Word 'closing document without saving'
    if($doc) { $doc.Close(0); [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($doc) }
   }
@@ -182,6 +192,9 @@ finally {
     Trace-Word 'Word left visible because documents remain open'
    } else { $word.Quit(0) }
   } catch { Trace-Word 'Word shutdown error' @{error=$_.Exception.GetType().Name} }
+  [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($word)
+ } elseif($word) {
+  # Never Quit or change settings on an instance whose ownership was not proven.
   [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($word)
  }
  [GC]::Collect(); [GC]::WaitForPendingFinalizers()

@@ -342,7 +342,8 @@ def choose_folders():
         f'Found {count} Word documents.\n\nRoot: {root}\n\nOriginals archive: {archive}\n\n'
         'PDFs will be saved beside the originals. After each PDF passes checks, its unchanged original will be moved to the archive. '
         'Existing PDFs and archive files will be skipped.\n\n'
-        'The final version of tracked changes will print, without markup. Close Word before continuing.\n\nStart?'):
+        'Tracked changes follow the selected preservation policy. Existing Word sessions may remain open. '
+        'Saved Word preferences can depend on which instance closes last. Avoid editing selected source files during conversion.\n\nStart?'):
         return None
     app.destroy()
     return root, archive

@@ -20,7 +20,8 @@ installer or executable is not included.
 
 Extract the release ZIP and double-click `Open Word to PDF.cmd`. Select Starting
 and Originals directories, preview the file list, then convert. Read
-`Instructions.txt` before processing documents. Keep Word closed during a queue.
+`Instructions.txt` before processing documents. Word may remain open; the app uses
+a separate owned instance. Avoid opening or editing the selected source files.
 
 ## Features
 
@@ -30,6 +31,9 @@ and Originals directories, preview the file list, then convert. Read
 - Checksum-verified originals, restoration records and protected failure handling.
 - Parallel PDF verification and background source staging.
 - Excel queue reports, diagnostics and detailed Accept/Revert/Undo review.
+- Existing-Word Continue/Cancel notice with a remembered warning preference.
+- Always-on process ownership, Word-option and macro-protection checks before
+  document opening and PDF output. Failed checks withhold the PDF.
 
 Verification does not guarantee the absence of every possible form of sensitive
 information. Visible document contents remain the user's responsibility; image
@@ -38,9 +42,10 @@ support. See the complete instructions for limitations and option tradeoffs.
 
 ## Validation
 
-Version 1.8.0 passed 73 automated tests and interface checks. Matched full-queue
-tests converted 16 documents with equivalent text/pixels, archive checksums and
-review outcomes. Performance varies by document, machine and storage.
+Version 1.10.0 passed 73 automated tests, interface checks, guard fault-injection
+tests, and live coexistence/recovery tests with an existing unsaved Word document.
+Earlier matched full-queue tests converted 16 documents with equivalent text/pixels,
+archive checksums and review outcomes. Performance varies by workload and hardware.
 
 Run `python -m unittest discover -s Tests -p "test_*.py"` with the required test
 dependencies. Word integration tests require Word and an interactive Windows desktop.

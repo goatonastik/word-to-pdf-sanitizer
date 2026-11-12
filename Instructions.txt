@@ -1,4 +1,33 @@
-WORD TO PDF SANITIZER - VERSION 1.8.0
+WORD TO PDF SANITIZER - VERSION 1.10.0
+
+ALWAYS-ON WORD EXPORT GUARDS
+Every document verifies the conversion process identity, six required Word options,
+and disabled macro execution before opening and before PDF output. Unexpected
+setting changes are corrected and read back; failed verification withholds the PDF.
+A change detected immediately after opening also withholds the PDF because its
+effect during opening cannot be safely undone. Failures use the existing conversion
+failure/REVIEW handling. Checkpoint counts, elapsed time, and setting correction
+events are recorded in diagnostics; privacy reports summarize checks/corrections.
+These safeguards apply even when no other Word session exists and remain active
+when the existing-Word warning is suppressed. Existing Word sessions are not edited.
+
+The existing-Word notice includes Don't warn me again. Select it and Continue to
+disable future notices. Cancel leaves the preference unchanged. Re-enable the
+notice in Processing and review with Warn before converting when Microsoft Word
+is already open. This preference is remembered across sessions, defaults to on,
+and also applies to reconversion through Undo after Revert.
+
+WORD CAN REMAIN OPEN
+When Word is already running, conversion presents a Continue/Cancel notice. A
+separate Word instance is created, and its process identity must be proven before
+the converter changes settings or documents. Existing Word instances are never
+adopted or closed. Preview does not need this notice. Undo after Revert shows the
+same notice if it needs to convert again while Word is open.
+Changes to preferences do not immediately change another running Word instance
+in testing. Saved preferences are shared by the Windows account, so shutdown order
+can affect what a later instance loads, particularly after an interruption. The
+converter restores its saved preferences on normal shutdown and attempts recovery
+after forced termination. Do not edit/open documents currently being converted.
 
 VERSION 1.8.0 PIXEL COMPARISON
 All-page visual checks compare PDFium bitmap memory directly when NumPy is
@@ -20,7 +49,7 @@ Validation: 71 automated tests, interface checks and real Word review/restoratio
 hidden-text, dynamic-field and process-recovery fixtures passed.
 
 START
-Close Word. Double-click Open Word to PDF.cmd or Convert Word to PDF.cmd.
+Double-click Open Word to PDF.cmd or Convert Word to PDF.cmd.
 Choose or drag Starting and Originals directories into their fields. Settings
 are remembered. Preview lists planned files. Convert and archive starts the queue.
 Options use two columns and scroll; progress, status, actions and log stay visible.
@@ -143,7 +172,7 @@ exception text. Review/anonymize before sharing. No logs/documents are uploaded.
 
 REQUIREMENTS
 Signed-in Windows desktop, Word and the Codex bundled Python runtime with pypdf,
-pypdfium2, Pillow and lxml. Do not open Word or edit selected files during a queue.
+pypdfium2, Pillow and lxml. Do not edit or open selected source files during a queue.
 CLI example:
 Convert Word to PDF.cmd --root "C:\Export\Client" --archive "C:\Export\#ORIGINALS" --preserve-root --preview
 Remove --preview to convert. --settings accepts preferences JSON. --debug/--no-debug
@@ -220,7 +249,7 @@ Document-level refusals reuse the Word session. Word options are snapshotted bef
 changes, restored normally, and recovery is attempted after forced termination.
 Idle Word workers stop when their Python parent exits. Processes are identified by
 window/new-process identity and start time; unrelated Word instances are not killed.
-Keep Word closed and do not change selected files while a queue is active.
+Do not change selected files while a queue is active. Word may remain open.
 
 Recovery rows and restore records are flushed to disk. Report write errors retain
 outcomes through diagnostics where possible and do not get attributed to another

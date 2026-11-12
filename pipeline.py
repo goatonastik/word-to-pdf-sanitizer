@@ -154,6 +154,8 @@ class WordSession:
         self.debug.event('worker_started',worker='Word',process_id=self.process.pid)
         try:
             self.ready = self.wait('ready.json', lambda: None)
+            if self.ready.get('existingWordCount',0):
+                print('NOTICE: Existing Word session detected. Conversion is using a separate owned Word instance; open documents are left alone. Saved Word preferences may depend on shutdown order.',flush=True)
         except Exception:
             self.close(force=False)
             raise
@@ -318,7 +320,7 @@ def batch(root, archive, timeout=180, preview=False):
             version_path=core.HERE/'VERSION.txt'
             core.DEBUG_LOG.event('environment',program_version=version_path.read_text().strip() if version_path.exists() else 'unknown',python=sys.version,executable=sys.executable,platform=sys.platform,temporary_directory=tempfile.gettempdir(),settings=settings)
             core.DEBUG_LOG.stage('queue started',dict(source_root=root,archive_root=archive))
-            core.DEBUG_LOG.event('program_fingerprints',sha256={name:core.digest(core.HERE/name) for name in ('convert.py','pipeline.py','debugtrace.py','maintenance.py','PropertyInventory.ps1','WordSessionSupport.ps1','Export-Session.ps1','Interface.ps1','ProcessLauncher.ps1','LogTail.ps1','runlogs.py','reports.py','fileops.py','fieldcache.py')})
+            core.DEBUG_LOG.event('program_fingerprints',sha256={name:core.digest(core.HERE/name) for name in ('convert.py','pipeline.py','debugtrace.py','maintenance.py','PropertyInventory.ps1','WordSessionSupport.ps1','WordExportGuards.ps1','Export-Session.ps1','Interface.ps1','ProcessLauncher.ps1','LogTail.ps1','runlogs.py','reports.py','fileops.py','fieldcache.py')})
         configure_library_logging(core.DEBUG_LOG)
         _batch(root,archive,timeout,preview)
         completed=bool(core.PROGRESS.get('finished')) and core.PROGRESS.get('unprocessed',0)==0
@@ -501,6 +503,10 @@ def _batch(root, archive, timeout=180, preview=False):
             if inventory_warning: notes+=' '+inventory_warning
             if a.get('dynamicFieldsLocked'):notes+=f" {a['dynamicFieldsLocked']} environment-dependent field(s) frozen to saved display values."
             if a.get('secondExportSkipped'):notes+=' Unchanged Word appearance reference reused; redundant second Word export skipped.'
+            if a.get('wordGuardChecks'):notes+=f" Word instance/settings/macro protection verified at {a['wordGuardChecks']} checkpoints."
+            guard_events=a.get('wordGuardEvents',[])
+            corrected=sorted({event.get('setting','') for event in guard_events if event.get('result')=='Corrected and verified'})
+            if corrected:notes+=' Unexpected Word settings corrected and verified: '+', '.join(corrected)+'.'
             if a.get('archiveTimestampWarning'):notes+=' Archive bytes verified; timestamp/attribute copy warning (see diagnostics).'
             journal_row(privacy,privacy_stream,[run_id,source,source.with_suffix('.pdf'),status,'; '.join(types) or 'None recorded / not processed', 'Excluded' if a.get('propertiesExcluded') else 'Included' if a else 'Not processed',a.get('customPropertiesFound',''),*[a.get(k,'') for k in ('commentsRemoved','revisionsAccepted','hiddenRangesRemoved','pdf_property_fields_removed','xmp_streams_removed','hyperlinks_removed','private_app_dictionaries_removed','object_dates_removed')], 'Excluded' if a.get('tagsExcluded') else 'Included' if a else 'Not processed',a.get('cleanup_verification','Not performed'),a.get('original_appearance','Not performed'),notes,a.get('sourcePropertyTypesFound',''),a.get('pdf_property_names_removed',''),a.get('revisionPolicy','Not measured'),'; '.join(reasons),copy_path,copy_state],'privacy report')
             diagnostic(dict(event='document', source=source, **result))

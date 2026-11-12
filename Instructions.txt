@@ -1,0 +1,285 @@
+WORD TO PDF SANITIZER - VERSION 1.8.0
+
+VERSION 1.8.0 PIXEL COMPARISON
+All-page visual checks compare PDFium bitmap memory directly when NumPy is
+available, with Pillow as a fallback. This avoids full-page image copies while
+retaining every pixel check, text check and mismatch diagnostic. No GPU is required.
+Two concurrent Word instances were experimentally tested but are not enabled;
+their small export-only timing gain did not justify shared-settings/recovery risk.
+
+PERFORMANCE UPDATE
+Verification workers: 0 selects automatically; 1-16 sets a fixed count. An i5-14500
+with 20 logical CPUs selects six workers. Leave the queue limit at 0 for unlimited
+pending verification. Background source staging, verified-hash reuse, shorter polling,
+and guarded reuse of unchanged Word exports are enabled automatically. Word remains
+a single persistent renderer. All PDF sanitation and text/pixel checks remain enabled.
+See Documentation\Performance Results.txt for benchmark results and operating limits.
+The benchmark corpus took 64.398 seconds versus 93.732 seconds before this update.
+These measurements were obtained on this test machine, not the target i5-14500.
+Validation: 71 automated tests, interface checks and real Word review/restoration,
+hidden-text, dynamic-field and process-recovery fixtures passed.
+
+START
+Close Word. Double-click Open Word to PDF.cmd or Convert Word to PDF.cmd.
+Choose or drag Starting and Originals directories into their fields. Settings
+are remembered. Preview lists planned files. Convert and archive starts the queue.
+Options use two columns and scroll; progress, status, actions and log stay visible.
+
+Example:
+  Starting: C:\Export\Client
+  Originals: C:\Export\#ORIGINALS
+  PDF: C:\Export\Client\Subfolder\Letter.pdf
+  Archived original: C:\Export\#ORIGINALS\Client\Subfolder\Letter.docx
+  Review copy: C:\Export\#REVIEW\Client\Subfolder\Letter.docx
+#REVIEW is a sibling of the selected Originals directory. It preserves the Starting
+folder name and subfolders. Existing older Originals\REVIEW folders are retained;
+new review copies/reports go to the sibling #REVIEW folder.
+
+PRIVACY OPTIONS
+All privacy exclusions initially default to enabled and choices are remembered.
+Preserve tracked changes only when visible by default: preserve saved visible
+redlines/Simple Markup, accept hidden final-view edits in the PDF copy. Off means
+accept all edits and remove revision history/markup, including visible redlines.
+This does not reject edits. The selected final/redline view is the reference.
+Remove ALL comments: includes visible comments. Removal is independent of preserving
+redlines. The appearance reference is comment-free; removals are logged without triggering review.
+Exclude hidden text: remove hidden-font ranges in the unsaved copy. Not redaction
+of white-on-white text, covered objects or cropped pixels. Off preserves saved hidden formatting without revealing the text.
+Exclude Word properties: disable their inclusion at export.
+Remove PDF properties: remove PDF info/XMP/private application metadata.
+Remove hyperlinks: remove destinations, retain visible text.
+Exclude accessibility tags/alt text: reduces hidden supporting data and screen-reader
+support. Turn off if accessibility is needed.
+Visible names in text/fields/headers remain. Image payload metadata is not inspected.
+Legacy DOC source-property categories and counts are inspected through Word COM.
+Unavailable inventories are logged as warnings. Word originals retain their full history.
+
+REVIEW
+REVIEW is limited to these cases:
+- Appearance mismatch, verification/conversion failure, or incomplete archiving.
+- Visible comments preserved because comment removal is disabled.
+- Visible tracked changes preserved according to the preservation option.
+Hidden revisions accepted, comments removed, unavailable property inventories,
+existing-output skips and name collisions are logged without review copies.
+The former already-converted review option is removed; older saved settings for
+it are ignored. Existing review copies from previous runs are retained.
+A per-queue review spreadsheet in #REVIEW\StartingFolder lists reasons and copy locations.
+Identical existing copies are reused. Different versions are preserved under
+_versions\QueueName with matching remaining subfolders. Copy errors are logged.
+The optional popup appears only when new Word review copies were added, shows
+the number, and offers Do not show this again. Re-enable it in the main settings.
+
+COPY LOG
+Copy displayed log to clipboard copies exactly the currently displayed text.
+
+REPLACE CONVERTED DOCUMENTS WITH ORIGINALS
+Select the same Starting and Originals directories used for conversion. The button
+builds a plan and asks for confirmation before changing documents. Close Word first.
+For each recorded conversion it verifies the archive original, restores/checks the
+Word file in its old location, deletes only the recorded paired PDF, then removes
+the verified archived copy. #REVIEW copies remain. Different existing Word documents,
+changed originals and PDFs that fail recorded checksums are blocked.
+New conversions save original/PDF checksums in .sanitizer-records under the archive.
+Older successful conversion CSVs can also identify pairs. If older records lack a
+PDF checksum, the confirmation explicitly warns that their paired PDFs will be
+deleted including any later edits. No file ownership is inferred from matching names
+alone. Missing/invalid records are left for manual review. Results are logged under
+application Logs\Maintenance. This action does not run without confirmation.
+
+DELETE LOGS
+Delete logs... builds a list and shows a Yes/No confirmation (default No). It covers
+application conversion logs and logs for the selected archived/review folder. It
+never deletes Word files, PDFs or restore records. Older conversion-report proofs
+are preserved privately under .sanitizer-records\legacy-reports before log deletion,
+so restoring older conversions still works. Maintenance plans/reports are retained.
+Logs changed since confirmation are retained. The operation cannot run during an
+active queue in this window. Restore/delete actions produce their own result report.
+
+VERIFICATION AND FAILURE BEHAVIOR
+A persistent Word session exports locally, while a reusable separate process checks
+PDFs. Each PDF is reopened/structurally checked; text, dimensions and rendered pages
+are compared before/after cleanup. It must also match its selected-view reference
+pixel-for-pixel at 144 dpi. This does not prove identical rendering at all zooms.
+Only verified PDFs are published. Originals are copied and checked by SHA256 before
+source copies are removed. A failure keeps the source, with details in reports.
+Publication/archive failures can leave final copies; reruns skip existing paths.
+Comments/scripts/attachments/forms or unsupported interactive features fail checks.
+No PDF printer is used. Macros and explicit link updates are disabled. Word may
+still recalculate layout/automatic fields. Saved display settings are respected;
+Word can fail to persist some transient UI choices, so save sources before running.
+If Original revision view is restored with preservation enabled, output is withheld.
+
+Word operation timeouts restart only this program's identified Word instance.
+Clean document refusals reuse Word; repeated startup failure stops the queue. Previously
+exported PDFs continue verification. A crashed verifier is replaced; verification has no separate watchdog. Queue limit
+0 means unlimited; positive values cap PDFs awaiting/undergoing verification. Temporary
+Word/PDF files stay in Windows TEMP, outside Starting and Originals, and are removed
+normally. Forced termination can leave word-pdf-export-* TEMP workspaces.
+Long working filenames are shortened internally only; final names remain unchanged.
+FILENAME fields that could be changed by shortening cause manual review instead.
+
+LOGS AND PROGRESS
+Discovery covers .doc/.docx/.docm recursively; lock files and filesystem links are
+excluded. Other types such as long .eml files are not inspected. Scan spreadsheets count
+files by folder and list inaccessible folders. An incomplete scan blocks conversion.
+Progress separates total/completed/converted/skipped/failed/PDF-only/exported/queued.
+A full bar means every file has an outcome, not every file succeeded. An optional
+completion ding plays after the queue finishes, including queues with errors.
+Live output is read incrementally. Progress-file locks cannot fail a document.
+
+Queue logs start with RootFolder [queue start time in UTC-7], followed by log type.
+FAILED means the queue did not finish; ERRORS means processing errors occurred.
+Both can occur. Active logs initially carry FAILED until completion. A forced kill
+can prevent adding ERRORS. Review flags and routine skips alone are not errors.
+Privacy spreadsheets distinguish observed removal counts from exclusions selected at export.
+Excel reports contain no removed property values/custom property names.
+
+Enable debug logging starts enabled and is remembered. Open logs provides coordinator
+-debug.jsonl, -word-debug.jsonl and -verification-debug.jsonl when those workers run.
+These record stages, paths, lengths, existence, identities, versions/fingerprints,
+heartbeats and full exceptions. Provide matching queue files for troubleshooting.
+They intentionally avoid body text/property values but contain client paths and
+exception text. Review/anonymize before sharing. No logs/documents are uploaded.
+
+REQUIREMENTS
+Signed-in Windows desktop, Word and the Codex bundled Python runtime with pypdf,
+pypdfium2, Pillow and lxml. Do not open Word or edit selected files during a queue.
+CLI example:
+Convert Word to PDF.cmd --root "C:\Export\Client" --archive "C:\Export\#ORIGINALS" --preserve-root --preview
+Remove --preview to convert. --settings accepts preferences JSON. --debug/--no-debug
+override debug mode. --timeout 300 allows five minutes per Word operation. The UI
+always preserves the Starting folder name; CLI callers use --preserve-root.
+
+VERSION 1.2.1
+Privacy/export options appear on the left; processing/review options on the right.
+Only options scroll. Conversion controls, progress, status, counts and the live log
+remain visible at the minimum supported window size.
+Legacy .doc property categories and custom-property counts are now read through
+Word COM. Their values and custom property names are not logged. An inventory
+warning remains possible when Word cannot inspect them; it does not mean the PDF
+contains those properties. PDF sanitation and verification still run independently.
+Both exports explicitly repaginate before rendering. Appearance failures still
+withhold the PDF and retain the source; verification debug logs now include the
+page, render size and bounding rectangle of changed pixels for investigation.
+
+VERSION 1.2.1 REVIEW POLICY
+Review copies and notifications now use only the three cases listed above.
+Routine sanitation and inventory warnings remain documented in queue logs/reports.
+
+VERSION 1.2.2 STATUS DISPLAY
+Status and counts stay on one line and truncate with an ellipsis. Widen the
+window to reveal more text, or hover to see the full text. No status scrollbar
+is added. Long filenames no longer shift the progress bar by wrapping.
+
+VERSION 1.3.0 EXCEL REPORTS
+All new scan, conversion, privacy, review and maintenance reports are .xlsx files.
+They are generated once after processing ends, without starting Excel, and include
+filters, frozen headings, column widths, wrapped text and failure/review highlights.
+Numbers used for counts are numeric; paths and other text are literal values.
+Queue names and FAILED/ERRORS suffixes remain unchanged. Existing CSV reports remain
+readable by restore/log-cleanup features; they are not converted or deleted here.
+
+During processing, durable CSV-format .csvlog recovery journals are written under
+application Logs\Recovery\QueueName. They are retained after Excel report creation.
+New CSV report files are not generated. Maintenance journals remain beside their
+plans in Logs\Maintenance. Diagnostics and debug logs retain their existing formats.
+The completion ding and review popup wait until Excel generation has finished.
+If report generation fails, the queue is marked ERRORS and the journal location is
+shown in the log. Converted documents are not reprocessed or flagged for REVIEW
+solely because an Excel report failed. Very long cells show an explicit truncation notice with their recovery location;
+the recovery journal retains the full value.
+The normal Delete logs confirmation also covers Excel reports and recovery journals;
+restoration records are preserved as before. No additional runtime package is needed.
+
+VERSION 1.4.0 REVIEWED RELIABILITY UPDATE
+Claude reviewed program source and tests in read-only mode with all tools disabled.
+Client documents, preferences and logs were not sent. See Documentation\Review Notes.txt for the
+findings addressed, validation and remaining operating limits.
+
+Caught write/checksum failures remove only incomplete files created by that copy.
+Existing files are never overwritten. Read-only originals can be archived/restored;
+the archive/restore keeps the Windows Mark-of-the-Web stream where present. File
+bytes are checked again immediately before removing a source or archived copy.
+Timestamp/attribute-copy problems after a verified archive are logged as warnings.
+
+REVIEW still has only the three triggers above. Header/footer and other story
+revisions are now included. Full-path FILENAME fields that would expose a TEMP path
+are withheld as conversion failures. Uncached linked content that is unavailable
+from the working copy is withheld; cached linked text is not rejected solely for
+having a link. These guards prevent a changed rendering from becoming its own
+appearance reference. All original Word document bytes remain unchanged.
+
+Reparse tags distinguish redirecting junctions/symlinks from cloud/dedup placeholders.
+Reading a cloud file can hydrate it; inaccessible inputs still produce scan errors.
+Live OneDrive/SharePoint integration was not available for testing.
+
+Pending verification outcomes are collected on queue abort. A verifier crash can
+recover completed work from durable restore records and replace the worker without
+killing Word. Repeated startup problems stop the queue and report unprocessed files.
+Document-level refusals reuse the Word session. Word options are snapshotted before
+changes, restored normally, and recovery is attempted after forced termination.
+Idle Word workers stop when their Python parent exits. Processes are identified by
+window/new-process identity and start time; unrelated Word instances are not killed.
+Keep Word closed and do not change selected files while a queue is active.
+
+Recovery rows and restore records are flushed to disk. Report write errors retain
+outcomes through diagnostics where possible and do not get attributed to another
+Word document. Locked log-renames are retried, then reported without losing queue
+completion. Library warnings go to diagnostics. The interface also receives the
+final result directly, independent of a temporarily locked progress snapshot.
+
+Maintenance plan hashing now runs in a background process. Quoted folder paths are
+normalized and invalid paths cannot terminate the window. Successful restores clear
+stale records; historical already-restored pairs are not reported as blocked.
+Log cleanup includes Word error logs and only recognizes generated report names or
+validated legacy conversion CSVs. Very long root names use a shortened log label plus
+a hash; document/archive/review folder names and structures are not shortened.
+
+Saved DATE/TIME, user identity, print/create/save dates and file-size field values
+are locked in the TEMP DOCX/DOCM before Word opens it. PAGE/layout fields remain
+active. The original and archived Word bytes are unchanged. Unsafe unfrozen legacy
+fields and signed packages needing changes are withheld for review. Full-path or
+shortened-name FILENAME fields are refused unless already locked.
+
+If hyperlinks are retained, only HTTP/HTTPS/mailto and internal page destinations
+are supported. File/launch/remote-document links and chained actions are refused.
+Verification compares extracted text as well as rendered page pixels.
+
+Native verifier crashes during copying can clean up owned partial outputs using
+private receipts. Actual incomplete conversions with retained outputs leave safety
+records under Logs/.sanitizer-records, protected from log cleanup. They prevent a
+subsequent retry from silently treating that incomplete conversion as a routine
+existing-file skip. Ordinary pre-existing outputs still skip without REVIEW.
+
+VERSION 1.5.0 REPORT PICKER
+The window title includes the installed version. The duplicate program name inside
+the window was removed. Above the displayed log, the Reports list shows generated
+Excel reports from application Logs, the selected Originals directory and its
+sibling #REVIEW directory. The newest report is selected automatically; choose any
+listed report and use Open report to open it in the associated spreadsheet program.
+The list refreshes when the window opens and after conversion or maintenance finishes.
+
+VERSION 1.5.1 FOLDER ORGANIZATION
+Automated Python and PowerShell checks are stored under Tests instead of the program
+folder root. Claude review material and its review notes are stored under
+Documentation. These organizational changes do not affect conversion performance or
+the application launchers. Tests\README.txt lists the verification commands.
+
+VERSION 1.6.0 DETAILED REVIEW
+The review notification includes Detailed review. The selected report can also be
+opened with Open detailed report beside Open report. Review entries show the unchanged
+Word original and converted PDF in adjacent file-list columns. Click either filename
+to open it. Hover over ? to see the exact review reason.
+
+Accept records that the conversion was approved and leaves its files unchanged.
+Revert uses the conversion's saved checksums to restore the original Word document
+and remove only the matching program-created PDF and archived copy. After either
+choice, Accept and Revert are disabled for that row. Undo clears an acceptance; after
+a revert it reconverts and verifies only that document, then enables a new choice.
+
+Decisions, timestamps, results and history are retained in a protected decision
+record and added to the selected Excel report when the detailed window closes. The
+report is exclusively locked while the window is open. If Excel or another process
+already has it open, the program shows Retry and Abort choices. Workbook replacement
+is complete and atomic; restoration and reconversion failures leave the prior decision
+and available files unchanged wherever the underlying safe operation permits.

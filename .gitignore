@@ -1,0 +1,7 @@
+__pycache__/
+*.py[cod]
+Logs/
+preferences.json
+*.zip
+*.7z
+.sanitizer-records/
